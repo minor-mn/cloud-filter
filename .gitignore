@@ -1,0 +1,21 @@
+# Generated CIDR lists and ipset restore files
+/output/
+
+# Local configuration (config.env.example is tracked)
+/config.env
+/whitelist.local.txt
+
+# Logs
+*.log
+
+# OS / Editor files
+.DS_Store
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Ruby / Bundler
+/.bundle/
+/vendor/bundle/

@@ -1,0 +1,10 @@
+# /etc/cron.d/cloud-filter
+# rezmoss/cloud-provider-ip-addresses は毎日 02:00 UTC (11:00 JST) に更新されます。
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# OS再起動時に、保存済みのリストを即座にipset+iptablesへ復元し、その後最新へ更新
+@reboot root /opt/cloud-filter/cloud-filter.sh apply >> /var/log/cloud-filter.log 2>&1
+
+# 毎日 03:35 (サーバーローカル時刻) に最新リストを取得してアトミック更新
+35 3 * * * root /opt/cloud-filter/cloud-filter.sh update >> /var/log/cloud-filter.log 2>&1
