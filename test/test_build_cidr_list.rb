@@ -103,4 +103,14 @@ class TestBuildCidrList < Minitest::Test
       assert_equal(["4.151.71.176/28", "203.0.113.0/25"], drop_v4)
     end
   end
+
+  def test_sakura_asn_expansion_and_fetch
+    def @builder.fetch_asn_prefixes(asn, timeout: 30)
+      asn == "AS7684" ? ["133.242.0.0/16", "2401:2500::/32"] : ["153.120.0.0/17"]
+    end
+
+    v4, v6 = @builder.fetch_providers_cidrs(["sakura"], base_urls: ["https://example.com"])
+    assert_equal(["133.242.0.0/16", "153.120.0.0/17"], v4.map(&:to_s).sort)
+    assert_equal(["2401:2500::/32"], v6.map(&:to_s))
+  end
 end

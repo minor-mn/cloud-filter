@@ -30,6 +30,15 @@ module CloudFilter
     telegram tencent tor upcloud uptimerobot vultr wasabi yandex zoho zoom zscaler
   ].freeze
 
+  # Domestic cloud/VPS ASNs not covered by upstream repo (fetched via RIPEstat BGP API)
+  ASN_PROVIDERS = {
+    "sakura"  => %w[AS7684 AS9370],
+    "conoha"  => %w[AS7506],
+    "xserver" => %w[AS131965],
+    "kagoya"  => %w[AS9619],
+    "idcf"    => %w[AS55392]
+  }.freeze
+
   # Lightweight logger (Ruby 4.0 removed `logger` from default gems into bundled gems)
   class ConsoleLogger
     LEVELS = { debug: 0, info: 1, warn: 2, error: 3 }.freeze
@@ -282,43 +291,75 @@ module CloudFilter
       nil
     end
 
+    def fetch_asn_prefixes(asn, timeout: 30)
+      url = "https://stat.ripe.net/data/announced-prefixes/data.json?resource=#{asn}"
+      body = fetch_url(url, timeout:)
+      return [] if body.nil?
+
+      data = JSON.parse(body)
+      prefixes = data.dig("data", "prefixes") || []
+      prefixes.filter_map { it["prefix"] }
+    end
+
     def fetch_providers_cidrs(providers, base_urls:, enable_v4: true, enable_v6: true, timeout: 30, max_threads: 8)
       v4_all = []
       v6_all = []
-      tasks = []
+      repo_tasks = []
+      asns = []
 
-      providers.each do |prov|
+      expanded = providers.flat_map do |prov|
         p = prov.strip.downcase
+        p == "all_providers" ? ["all_providers", *ASN_PROVIDERS.keys] : [p]
+      end.uniq
+
+      expanded.each do |p|
         next if p.empty?
 
-        tasks << [p, 4] if enable_v4
-        tasks << [p, 6] if enable_v6
+        if ASN_PROVIDERS.key?(p)
+          asns.concat(ASN_PROVIDERS[p])
+        elsif p.match?(/\Aas\d+\z/i)
+          asns << p.upcase
+        else
+          repo_tasks << [:repo, p, 4] if enable_v4
+          repo_tasks << [:repo, p, 6] if enable_v6
+        end
       end
-      return [v4_all, v6_all] if tasks.empty?
+      asns.uniq.each { repo_tasks << [:asn, it, nil] }
+      return [v4_all, v6_all] if repo_tasks.empty?
 
-      queue = Thread::Queue.new(tasks)
+      queue = Thread::Queue.new(repo_tasks)
       mutex = Mutex.new
       errors = []
 
-      workers = Array.new([max_threads, tasks.size].min) do
+      workers = Array.new([max_threads, repo_tasks.size].min) do
         Thread.new do
           while (task = queue.pop(true) rescue nil)
-            prov, version = task
+            kind, target, version = task
             begin
-              paths = provider_candidate_paths(prov, version)
-              content = fetch_with_fallback(paths, base_urls, timeout:)
-              if content.nil?
-                @logger.info("Provider '#{prov}' has no IPv#{version} list (404/empty), skipping.")
-                next
-              end
-              v4_parsed, v6_parsed = parse_cidrs(content.lines, ip_version: version)
-              mutex.synchronize do
-                if version == 4
-                  @logger.info("Fetched #{v4_parsed.size} IPv4 CIDRs for provider '#{prov}'")
-                  v4_all.concat(v4_parsed)
-                else
-                  @logger.info("Fetched #{v6_parsed.size} IPv6 CIDRs for provider '#{prov}'")
-                  v6_all.concat(v6_parsed)
+              if kind == :asn
+                lines = fetch_asn_prefixes(target, timeout:)
+                v4_parsed, v6_parsed = parse_cidrs(lines)
+                mutex.synchronize do
+                  @logger.info("Fetched #{v4_parsed.size} IPv4 / #{v6_parsed.size} IPv6 CIDRs for #{target}")
+                  v4_all.concat(v4_parsed) if enable_v4
+                  v6_all.concat(v6_parsed) if enable_v6
+                end
+              else
+                paths = provider_candidate_paths(target, version)
+                content = fetch_with_fallback(paths, base_urls, timeout:)
+                if content.nil?
+                  @logger.info("Provider '#{target}' has no IPv#{version} list (404/empty), skipping.")
+                  next
+                end
+                v4_parsed, v6_parsed = parse_cidrs(content.lines, ip_version: version)
+                mutex.synchronize do
+                  if version == 4
+                    @logger.info("Fetched #{v4_parsed.size} IPv4 CIDRs for provider '#{target}'")
+                    v4_all.concat(v4_parsed)
+                  else
+                    @logger.info("Fetched #{v6_parsed.size} IPv6 CIDRs for provider '#{target}'")
+                    v6_all.concat(v6_parsed)
+                  end
                 end
               end
             rescue StandardError => e
