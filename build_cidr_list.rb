@@ -16,8 +16,8 @@ require "socket"
 require "uri"
 
 module CloudFilter
-  DEFAULT_PRIMARY_BASE_URL = "https://cdn.jsdelivr.net/gh/rezmoss/cloud-provider-ip-addresses@main"
-  DEFAULT_FALLBACK_BASE_URL = "https://raw.githubusercontent.com/rezmoss/cloud-provider-ip-addresses/main"
+  DEFAULT_PRIMARY_BASE_URL = "https://raw.githubusercontent.com/rezmoss/cloud-provider-ip-addresses/main"
+  DEFAULT_FALLBACK_BASE_URL = "https://cdn.jsdelivr.net/gh/rezmoss/cloud-provider-ip-addresses@main"
 
   KNOWN_PROVIDERS = %w[
     akamai alibaba amazonbot apple_private_relay applebot atlassian aws azure
@@ -380,7 +380,7 @@ module CloudFilter
     def run_cli(argv)
       options = {
         list_providers: false,
-        providers: ENV.fetch("PROVIDERS", "gptbot claudebot perplexitybot amazonbot tor"),
+        providers: ENV.fetch("PROVIDERS", "all_providers"),
         exclude_providers: ENV.fetch("EXCLUDE_PROVIDERS", ""),
         whitelist_files: [],
         whitelist_cidrs: [],

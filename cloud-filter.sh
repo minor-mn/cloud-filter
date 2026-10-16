@@ -39,8 +39,8 @@ elif [[ -f "${SCRIPT_DIR}/config.env.example" ]]; then
 fi
 
 # デフォルト設定値
-PROVIDERS="${PROVIDERS:-gptbot claudebot perplexitybot amazonbot commoncrawl tor}"
-EXCLUDE_PROVIDERS="${EXCLUDE_PROVIDERS:-cloudflare}"
+PROVIDERS="${PROVIDERS:-all_providers}"
+EXCLUDE_PROVIDERS="${EXCLUDE_PROVIDERS:-}"
 ENABLE_IPV4="${ENABLE_IPV4:-true}"
 ENABLE_IPV6="${ENABLE_IPV6:-true}"
 WHITELIST_FILE="${WHITELIST_FILE:-${SCRIPT_DIR}/whitelist.txt}"
@@ -53,8 +53,8 @@ IPSET_ALLOW_V4="${IPSET_ALLOW_V4:-cloud_allow_v4}"
 IPSET_ALLOW_V6="${IPSET_ALLOW_V6:-cloud_allow_v6}"
 LOG_DROPS="${LOG_DROPS:-false}"
 LOG_PREFIX="${LOG_PREFIX:-[CLOUD-FILTER-DROP] }"
-PRIMARY_BASE_URL="${PRIMARY_BASE_URL:-https://cdn.jsdelivr.net/gh/rezmoss/cloud-provider-ip-addresses@main}"
-FALLBACK_BASE_URL="${FALLBACK_BASE_URL:-https://raw.githubusercontent.com/rezmoss/cloud-provider-ip-addresses/main}"
+PRIMARY_BASE_URL="${PRIMARY_BASE_URL:-https://raw.githubusercontent.com/rezmoss/cloud-provider-ip-addresses/main}"
+FALLBACK_BASE_URL="${FALLBACK_BASE_URL:-https://cdn.jsdelivr.net/gh/rezmoss/cloud-provider-ip-addresses@main}"
 OUTPUT_DIR="${OUTPUT_DIR:-${SCRIPT_DIR}/output}"
 
 # 相対パスの解決
@@ -96,7 +96,7 @@ require_commands() {
     fi
 }
 
-# 自動ロックアウト防止: 現在のSSH接続元IPやゲートウェイIPを検出
+# 自動ロックアウト防止: 現在のSSH接続元IPやゲートウェイIP・自ホストIPを検出
 collect_auto_whitelist_args() {
     local extra_args=()
     if [[ "${AUTO_WHITELIST_ENV}" != "true" ]]; then
@@ -114,15 +114,19 @@ collect_auto_whitelist_args() {
         extra_args+=("--whitelist-cidr" "${ssh_src}")
     fi
 
-    # 2. デフォルトゲートウェイやインターフェースのローカルIPを保護 (ip コマンドがある場合)
+    # 2. デフォルトゲートウェイおよび自ホストのインターフェースIPを保護 (ip コマンドがある場合)
     if command -v ip >/dev/null 2>&1; then
         while IFS= read -r gw; do
-            [[ -n "${gw}" ]] && extra_args+=("--whitelist-cidr" "${gw}")
+            [[ -n "${gw}" && "${gw}" != *%* ]] && extra_args+=("--whitelist-cidr" "${gw}")
         done < <(ip route show default 2>/dev/null | awk '/default/ {print $3}' || true)
 
         while IFS= read -r gw6; do
-            [[ -n "${gw6}" ]] && extra_args+=("--whitelist-cidr" "${gw6}")
+            [[ -n "${gw6}" && "${gw6}" != *%* ]] && extra_args+=("--whitelist-cidr" "${gw6}")
         done < <(ip -6 route show default 2>/dev/null | awk '/default/ {print $3}' || true)
+
+        while IFS= read -r self_ip; do
+            [[ -n "${self_ip}" && "${self_ip}" != *%* ]] && extra_args+=("--whitelist-cidr" "${self_ip}")
+        done < <(ip -o addr show scope global 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4}' || true)
     fi
 
     if [[ ${#extra_args[@]} -gt 0 ]]; then
