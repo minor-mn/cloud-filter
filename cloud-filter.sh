@@ -47,6 +47,8 @@ WHITELIST_FILE="${WHITELIST_FILE:-${SCRIPT_DIR}/whitelist.txt}"
 AUTO_WHITELIST_ENV="${AUTO_WHITELIST_ENV:-true}"
 IPTABLES_CHAIN="${IPTABLES_CHAIN:-CLOUD_FILTER}"
 IPTABLES_TARGET_CHAINS="${IPTABLES_TARGET_CHAINS:-INPUT}"
+ALLOW_TCP_PORTS="${ALLOW_TCP_PORTS:-25}"
+ALLOW_UDP_PORTS="${ALLOW_UDP_PORTS:-}"
 IPSET_DROP_V4="${IPSET_DROP_V4:-cloud_drop_v4}"
 IPSET_DROP_V6="${IPSET_DROP_V6:-cloud_drop_v6}"
 IPSET_ALLOW_V4="${IPSET_ALLOW_V4:-cloud_allow_v4}"
@@ -192,17 +194,25 @@ configure_firewall_chain() {
     # 3. ホワイトリスト ipset にマッチする通信は最優先で RETURN (許可)
     "${ipt_cmd}" -A "${IPTABLES_CHAIN}" -m set --match-set "${allow_set}" src -j RETURN
 
-    # 4. (任意) DROP前のレート制限付きログ出力
+    # 4. 許可ポート (メール受信 25/tcp 等) への通信はクラウドIPからでも RETURN (許可)
+    if [[ -n "${ALLOW_TCP_PORTS}" ]]; then
+        "${ipt_cmd}" -A "${IPTABLES_CHAIN}" -p tcp -m multiport --dports "${ALLOW_TCP_PORTS// /,}" -j RETURN
+    fi
+    if [[ -n "${ALLOW_UDP_PORTS}" ]]; then
+        "${ipt_cmd}" -A "${IPTABLES_CHAIN}" -p udp -m multiport --dports "${ALLOW_UDP_PORTS// /,}" -j RETURN
+    fi
+
+    # 5. (任意) DROP前のレート制限付きログ出力
     if [[ "${LOG_DROPS}" == "true" ]]; then
         "${ipt_cmd}" -A "${IPTABLES_CHAIN}" -m set --match-set "${drop_set}" src \
             -m limit --limit 10/min --limit-burst 20 \
             -j LOG --log-prefix "${LOG_PREFIX}" --log-level 4
     fi
 
-    # 5. DROP ipset にマッチする通信を DROP
+    # 6. DROP ipset にマッチする通信を DROP
     "${ipt_cmd}" -A "${IPTABLES_CHAIN}" -m set --match-set "${drop_set}" src -j DROP
 
-    # 6. マッチしなかった通信は親チェインへ戻す
+    # 7. マッチしなかった通信は親チェインへ戻す
     "${ipt_cmd}" -A "${IPTABLES_CHAIN}" -j RETURN
 
     # 親チェイン (INPUT や DOCKER-USER など) の先頭にジャンプを登録 (未登録の場合のみ)
